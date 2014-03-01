@@ -1,18 +1,21 @@
 from django.core.cache.backends.base import BaseCache
-import requests
+from django.utils import six
+import requests, msgpack
 
 
 class OlegDBCache(BaseCache):
 
     def __init__(self, host, *args, **kwargs):
         self.location = host
+        super(OlegDBCache, self).__init__(*args, **kwargs)
 
     def add(self, key, value, timeout=None, version=None):
         key = self.make_key(key, version=version)
         self.validate_key(key)
-        resp = request.get('{}/{}'.format(self.location, key))
+        resp = requests.get('{}/{}'.format(self.location, key))
         if resp.status_code == 404:
-            resp = request.post('{}/{}'.format(self.location, key), data=value)
+            value = msgpack.packb(data, use_bin_type=True)
+            resp = requests.post('{}/{}'.format(self.location, key), data=value)
             return True
         return False
 
@@ -22,17 +25,18 @@ class OlegDBCache(BaseCache):
         resp = requests.get('{}/{}'.format(self.location, key), stream=True)
         if resp.status_code == 404:
             return default
-        return resp.raw.read()
+        return msgpack.unpackb(resp.raw.read(), encoding='utf-8')
 
     def set(self, key, value, timeout=None, version=None):
         key = self.make_key(key, version=version)
         self.validate_key(key)
-        resp = request.post('{}/{}'.format(self.location, key), data=value)
+        value = msgpack.packb(value, use_bin_type=True)
+        resp = requests.post('{}/{}'.format(self.location, key), data=value)
 
     def delete(self, key, version=None):
         key = self.make_key(key, version=version)
         self.validate_key(key)
-        resp = request.delete('{}/{}'.format(self.location, key))
+        resp = requests.delete('{}/{}'.format(self.location, key))
 
     def get_many(self, keys, version=None):
         many = {}
@@ -41,7 +45,7 @@ class OlegDBCache(BaseCache):
             self.validate_key(key)
             resp = requests.get('{}/{}'.format(self.location, key), stream=True)
             if resp.status_code != 404:
-                many[key] = resp.raw.read()
+                many[key] = msgpack.unpackb(resp.raw.read(), encoding='utf-8')
         return many
 
     def has_key(self, key, version=None):

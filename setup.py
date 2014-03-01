@@ -12,6 +12,7 @@ setup(
     zip_safe=True,
     install_requires = [
         "django",
+        "msgpack-python",
         "requests",
     ]
 )
