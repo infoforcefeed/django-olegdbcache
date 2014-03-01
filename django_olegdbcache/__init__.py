@@ -1,1 +1,1 @@
-from .cache import OlegDBCache
+from .oleg import OlegDBCache
