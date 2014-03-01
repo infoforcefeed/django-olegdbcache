@@ -1,3 +1,4 @@
+from django.core.cache.backends.base import BaseCache
 import requests
 
 
