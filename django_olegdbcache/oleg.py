@@ -1,6 +1,6 @@
 from django.core.cache.backends.base import BaseCache
 from django.utils import six
-import requests, msgpack
+import requests, msgpack, zlib
 
 
 class OlegDBCache(BaseCache):
@@ -9,12 +9,16 @@ class OlegDBCache(BaseCache):
         self.location = host
         super(OlegDBCache, self).__init__(*args, **kwargs)
 
+    def make_key(self, key, version):
+        key = super(OlegDBCache, self).make_key(key, version)
+        return str(zlib.crc32(key))
+
     def add(self, key, value, timeout=None, version=None):
         key = self.make_key(key, version=version)
         self.validate_key(key)
         resp = requests.get('{}/{}'.format(self.location, key))
         if resp.status_code == 404:
-            value = msgpack.packb(data, use_bin_type=True)
+            value = msgpack.packb(value, use_bin_type=True)
             resp = requests.post('{}/{}'.format(self.location, key), data=value)
             return True
         return False
