@@ -1,6 +1,6 @@
 from django.core.cache.backends.base import BaseCache
 from django.utils import six
-import requests, msgpack, zlib
+import requests, msgpack, hashlib, pickle
 
 
 class OlegDBCache(BaseCache):
@@ -9,17 +9,18 @@ class OlegDBCache(BaseCache):
         self.location = host
         super(OlegDBCache, self).__init__(*args, **kwargs)
 
-    def make_key(self, key, version):
-        key = super(OlegDBCache, self).make_key(key, version)
-        return str(zlib.crc32(key))
+    def _pack_item(self, value):
+        new_value = None
+        try:
+            new_value = msgpack.packb(value, use_bin_type=True)
+        except TypeError:
+            new_value = pickle.dumps(value)
+        return new_value
 
     def add(self, key, value, timeout=None, version=None):
-        key = self.make_key(key, version=version)
-        self.validate_key(key)
         resp = requests.get('{}/{}'.format(self.location, key))
         if resp.status_code == 404:
-            value = msgpack.packb(value, use_bin_type=True)
-            resp = requests.post('{}/{}'.format(self.location, key), data=value)
+            self.set(key, value, timeout, version)
             return True
         return False
 
@@ -30,12 +31,13 @@ class OlegDBCache(BaseCache):
         if resp.status_code == 404:
             return default
         return msgpack.unpackb(resp.raw.read(), encoding='utf-8')
+        #return pickle.loads(resp.raw.read())
 
     def set(self, key, value, timeout=None, version=None):
         key = self.make_key(key, version=version)
         self.validate_key(key)
-        value = msgpack.packb(value, use_bin_type=True)
-        resp = requests.post('{}/{}'.format(self.location, key), data=value)
+        new_value = self._pack_item(value)
+        resp = requests.post('{}/{}'.format(self.location, key), data=new_value)
 
     def delete(self, key, version=None):
         key = self.make_key(key, version=version)
@@ -45,11 +47,9 @@ class OlegDBCache(BaseCache):
     def get_many(self, keys, version=None):
         many = {}
         for key in keys:
-            key = self.make_key(key, version=version)
-            self.validate_key(key)
-            resp = requests.get('{}/{}'.format(self.location, key), stream=True)
-            if resp.status_code != 404:
-                many[key] = msgpack.unpackb(resp.raw.read(), encoding='utf-8')
+            returned = self.get(key, version)
+            if returned:
+                many[key] = returned
         return many
 
     def has_key(self, key, version=None):
@@ -62,15 +62,10 @@ class OlegDBCache(BaseCache):
 
     def set_many(self, data, timeout=None, version=None):
         for key, value in data.iteritems():
-            key = self.make_key(key, version=version)
-            self.validate_key(key)
             self.set(key, value, timeout, version)
-
 
     def delete_many(self, keys, version=None):
         for key in keys:
-            key = self.make_key(key, version=version)
-            self.validate_key(key)
             self.delete(key, value, timeout, version)
 
     def clear(self):
