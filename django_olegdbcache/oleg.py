@@ -28,12 +28,14 @@ class OlegDBCache(BaseCache):
         key = self.make_key(key, version=version)
         self.validate_key(key)
         resp = requests.get('{}/{}'.format(self.location, key), stream=True)
+        raw_response = resp.raw.read()
         if resp.status_code == 404:
             return default
         try:
-            return msgpack.unpackb(resp.raw.read(), encoding='utf-8')
+            return msgpack.unpackb(raw_response, encoding='utf-8')
         except msgpack.ExtraData:
-            return pickle.loads(resp.raw.read())
+            # Fall back to pickle
+            return pickle.loads(raw_response)
 
     def set(self, key, value, timeout=None, version=None):
         key = self.make_key(key, version=version)
