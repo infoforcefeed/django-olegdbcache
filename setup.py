@@ -14,5 +14,6 @@ setup(
         "django",
         "msgpack-python",
         "requests",
+        "olegdb-python",
     ]
 )

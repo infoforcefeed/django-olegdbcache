@@ -1,68 +1,55 @@
 from django.core.cache.backends.base import BaseCache
 from django.utils import six
-import requests, msgpack, hashlib, pickle
+from olegdb import OlegDB, DEFAULT_PORT
+import requests, msgpack, hashlib, pickle, re
 
 
 class OlegDBCache(BaseCache):
-
     def __init__(self, host, *args, **kwargs):
-        self.location = host
+        https_regex = re.compile(r"https?://")
+        host = https_regex.sub("", host)
+
+        regex = re.compile(r"\:(?P<port>[0-9]+)\/?")
+        host = regex.sub("", host)
+
+        matched = regex.findall(host)
+        if not matched:
+            port = DEFAULT_PORT
+        else:
+            port = matched[0]
+
+        self.connection = OlegDB(host, port)
         super(OlegDBCache, self).__init__(*args, **kwargs)
 
-    def _pack_item(self, value):
-        new_value = None
-        try:
-            new_value = msgpack.packb(value, use_bin_type=True)
-        except TypeError:
-            new_value = pickle.dumps(value)
-        return new_value
-
     def add(self, key, value, timeout=None, version=None):
-        resp = requests.get('{}/{}'.format(self.location, key))
-        if resp.status_code == 404:
-            self.set(key, value, timeout, version)
-            return True
-        return False
+        key = self.make_key(key, version=version)
+        self.validate_key(key)
+        return self.connection.add(key, value, timeout)
 
     def get(self, key, default=None, version=None):
         key = self.make_key(key, version=version)
         self.validate_key(key)
-        resp = requests.get('{}/{}'.format(self.location, key), stream=True)
-        raw_response = resp.raw.read()
-        if resp.status_code == 404:
-            return default
-        try:
-            return msgpack.unpackb(raw_response, encoding='utf-8')
-        except msgpack.ExtraData:
-            # Fall back to pickle
-            return pickle.loads(raw_response)
+        return self.connection.get(key, default)
 
     def set(self, key, value, timeout=None, version=None):
         key = self.make_key(key, version=version)
         self.validate_key(key)
-        new_value = self._pack_item(value)
-        resp = requests.post('{}/{}'.format(self.location, key), data=new_value)
+        return self.connection.set(key, value, timeout)
 
     def delete(self, key, version=None):
         key = self.make_key(key, version=version)
         self.validate_key(key)
-        resp = requests.delete('{}/{}'.format(self.location, key))
+        return self.connection.delete(key)
 
     def get_many(self, keys, version=None):
-        many = {}
-        for key in keys:
-            returned = self.get(key, version)
-            if returned:
-                many[key] = returned
-        return many
+        new_keys = [self.make_key(key, version=version) for key in keys]
+        [self.validate_key(key) for key in new_keys]
+        return self.connection.get_many(new_keys)
 
     def has_key(self, key, version=None):
         key = self.make_key(key, version=version)
         self.validate_key(key)
-        resp = requests.get('{}/{}'.format(self.location, key), stream=True)
-        if resp.status_code == 404:
-            return False
-        return True
+        return self.connection.has_key(key)
 
     def set_many(self, data, timeout=None, version=None):
         for key, value in data.iteritems():
